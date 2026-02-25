@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bluesky Feed Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --blue:rgb(56,136,254);--blue-light:rgb(56,136,254,.12);--blue-border:rgb(56,136,254,.3);
+  --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;
+  --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+  --radius:14px;--shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.04);
+  --shadow-lg:0 4px 12px rgba(0,0,0,.1);
+  --font-heading:'DM Serif Display',serif;--font-body:'Inter',system-ui,sans-serif;
+}
+body{font-family:var(--font-body);background:var(--slate-50);color:var(--slate-800);line-height:1.5}
+.container{max-width:640px;margin:0 auto;padding:16px}
+h1{font-family:var(--font-heading);text-align:center;font-size:1.8rem;margin:24px 0 20px;color:var(--slate-900)}
+/* Search */
+.search-bar{display:flex;gap:8px;margin-bottom:20px}
+.search-bar input{flex:1;padding:10px 14px;border:1.5px solid var(--slate-200);border-radius:10px;font-size:.95rem;font-family:var(--font-body);outline:none;transition:border .2s}
+.search-bar input:focus{border-color:var(--blue)}
+.btn{padding:10px 20px;background:var(--blue);color:#fff;border:none;border-radius:10px;font-family:var(--font-body);font-weight:600;font-size:.9rem;cursor:pointer;transition:opacity .2s}
+.btn:hover{opacity:.85}
+/* Profile */
+.profile-card{background:#fff;border:1px solid var(--slate-200);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);margin-bottom:20px;animation:fadeIn .3s}
+.profile-banner{height:120px;background:linear-gradient(135deg,var(--blue),#7dd3fc);background-size:cover;background-position:center}
+.profile-body{padding:16px;position:relative}
+.profile-avatar{width:72px;height:72px;border-radius:50%;border:3px solid #fff;position:absolute;top:-36px;left:16px;background:var(--slate-200);object-fit:cover}
+.profile-info{margin-top:40px}
+.profile-name{font-family:var(--font-heading);font-size:1.3rem}
+.profile-handle{color:var(--slate-500);font-size:.85rem}
+.profile-bio{margin-top:6px;font-size:.9rem;color:var(--slate-700);white-space:pre-wrap}
+.profile-stats{display:flex;gap:16px;margin-top:10px;font-size:.85rem;color:var(--slate-500)}
+.profile-stats strong{color:var(--slate-800)}
+/* Filters */
+.filter-bar{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+.filter-btn{padding:6px 14px;border:1.5px solid var(--slate-200);border-radius:8px;background:#fff;font-family:var(--font-body);font-size:.82rem;font-weight:500;cursor:pointer;color:var(--slate-600);transition:all .15s}
+.filter-btn.active{background:var(--blue-light);border-color:var(--blue-border);color:var(--blue)}
+/* Posts */
+.post-card{background:#fff;border:1px solid var(--slate-200);border-radius:var(--radius);padding:14px;margin-bottom:12px;box-shadow:var(--shadow);cursor:pointer;transition:box-shadow .15s;animation:slideUp .3s ease both}
+.post-card:hover{box-shadow:var(--shadow-lg)}
+.post-header{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.post-avatar{width:38px;height:38px;border-radius:50%;object-fit:cover;background:var(--slate-200)}
+.post-author-name{font-weight:600;font-size:.9rem}
+.post-author-handle{color:var(--slate-400);font-size:.8rem}
+.post-time{color:var(--slate-400);font-size:.78rem;margin-left:auto;white-space:nowrap}
+.post-text{font-size:.92rem;white-space:pre-wrap;word-break:break-word;margin-bottom:6px}
+.post-text a{color:var(--blue);text-decoration:none}
+.post-text a:hover{text-decoration:underline}
+.repost-label{font-size:.78rem;color:var(--slate-400);margin-bottom:6px;display:flex;align-items:center;gap:4px}
+/* Images */
+.post-images{display:grid;gap:4px;margin-top:6px;border-radius:10px;overflow:hidden}
+.post-images.img-1{grid-template-columns:1fr}
+.post-images.img-2{grid-template-columns:1fr 1fr}
+.post-images.img-3,.post-images.img-4{grid-template-columns:1fr 1fr}
+.post-images img{width:100%;aspect-ratio:4/3;object-fit:cover;cursor:pointer;display:block}
+/* External link card */
+.link-card{border:1px solid var(--slate-200);border-radius:10px;overflow:hidden;margin-top:6px;text-decoration:none;display:block;color:inherit;transition:background .15s}
+.link-card:hover{background:var(--slate-50)}
+.link-card-thumb{width:100%;aspect-ratio:1.91/1;object-fit:cover;display:block}
+.link-card-body{padding:10px}
+.link-card-title{font-weight:600;font-size:.85rem}
+.link-card-desc{font-size:.8rem;color:var(--slate-500);margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.link-card-url{font-size:.75rem;color:var(--slate-400);margin-top:4px}
+/* Quote embed */
+.quote-card{border:1px solid var(--slate-200);border-radius:10px;padding:10px;margin-top:6px;font-size:.88rem;background:var(--slate-50)}
+.quote-card .post-header{margin-bottom:4px}
+.quote-card .post-text{font-size:.85rem}
+/* Load more */
+.load-more-wrap{text-align:center;margin:16px 0 32px}
+.load-more-wrap .btn{background:transparent;color:var(--blue);border:1.5px solid var(--blue-border)}
+/* Status */
+.status{text-align:center;color:var(--slate-400);padding:32px 0;font-size:.9rem}
+/* Overlay */
+.overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(6px);z-index:100;overflow-y:auto;animation:fadeIn .2s}
+.overlay-inner{max-width:640px;margin:0 auto;padding:16px;min-height:100%}
+.overlay-back{position:sticky;top:12px;z-index:10;background:#fff;border:1px solid var(--slate-200);border-radius:10px;padding:8px 16px;font-family:var(--font-body);font-weight:600;font-size:.85rem;cursor:pointer;box-shadow:var(--shadow-lg);margin-bottom:12px;display:inline-block}
+.overlay-back:hover{background:var(--slate-50)}
+/* Thread posts */
+.thread-post{background:#fff;border:1px solid var(--slate-200);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow);animation:fadeIn .25s}
+.thread-post.focused{border-color:var(--blue);border-width:2px;box-shadow:0 0 0 3px var(--blue-light)}
+.thread-post .focused-label{font-size:.75rem;font-weight:600;color:var(--blue);margin-bottom:6px}
+.thread-connector{width:2px;height:20px;background:var(--blue-border);margin:0 0 0 32px}
+.thread-replies{padding-left:20px;border-left:2px solid var(--slate-200);margin-left:18px;margin-top:12px}
+.thread-replies .thread-post{margin-top:10px}
+.post-likes{font-size:.8rem;color:var(--slate-400);margin-top:6px}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Bluesky Feed Viewer</h1>
+  <div class="search-bar">
+    <input id="handleInput" type="text" placeholder="Enter a Bluesky handle (e.g. jay)" />
+    <button class="btn" id="viewBtn">View Feed</button>
+  </div>
+  <div id="profileSection"></div>
+  <div id="filterBar" class="filter-bar" style="display:none"></div>
+  <div id="feedSection"></div>
+  <div id="loadMoreWrap"></div>
+</div>
+<div id="overlay" class="overlay" style="display:none"></div>
+
+<script>
+const API = 'https://public.api.bsky.app/xrpc';
+let currentActor = '';
+let currentFilter = 'posts_and_author_threads';
+let currentCursor = null;
+
+/* --- Utilities --- */
+function esc(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function linkify(text) {
+  return esc(text).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" onclick="event.stopPropagation()">$1</a>');
+}
+function relTime(iso) {
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return 'now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h';
+  if (diff < 604800) return Math.floor(diff / 86400) + 'd';
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function fmtNum(n) {
+  if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1)+'K';
+  return n;
+}
+function normalizeHandle(h) {
+  h = h.trim().replace(/^@/, '');
+  if (!h.includes('.')) h += '.bsky.social';
+  return h;
+}
+
+/* --- URL sync --- */
+function syncURL() {
+  const p = new URLSearchParams();
+  if (currentActor) p.set('user', currentActor);
+  if (currentFilter !== 'posts_and_author_threads') p.set('filter', currentFilter);
+  const qs = p.toString();
+  history.replaceState(null, '', qs ? '?' + qs : location.pathname);
+}
+function readURL() {
+  const p = new URLSearchParams(location.search);
+  const u = p.get('user');
+  const f = p.get('filter');
+  if (u) {
+    document.getElementById('handleInput').value = u;
+    if (f) currentFilter = f;
+    loadProfile(u);
+  }
+}
+
+/* --- API helpers --- */
+async function api(method, params) {
+  const url = `${API}/${method}?${new URLSearchParams(params)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+
+/* --- Profile --- */
+async function loadProfile(handle) {
+  handle = normalizeHandle(handle);
+  currentActor = handle;
+  currentCursor = null;
+  syncURL();
+  const sec = document.getElementById('profileSection');
+  sec.innerHTML = '<div class="status">Loading profile…</div>';
+  document.getElementById('feedSection').innerHTML = '';
+  document.getElementById('loadMoreWrap').innerHTML = '';
+  try {
+    const p = await api('app.bsky.actor.getProfile', { actor: handle });
+    sec.innerHTML = renderProfile(p);
+    showFilters();
+    loadFeed(true);
+  } catch (e) {
+    sec.innerHTML = `<div class="status">Could not load profile: ${esc(e.message)}</div>`;
+  }
+}
+function renderProfile(p) {
+  const banner = p.banner ? `<div class="profile-banner" style="background-image:url('${esc(p.banner)}')"></div>` : '<div class="profile-banner"></div>';
+  const avatar = p.avatar ? `<img class="profile-avatar" src="${esc(p.avatar)}" alt="">` : '<div class="profile-avatar"></div>';
+  return `<div class="profile-card">${banner}<div class="profile-body">${avatar}<div class="profile-info">
+    <div class="profile-name">${esc(p.displayName || p.handle)}</div>
+    <div class="profile-handle">@${esc(p.handle)}</div>
+    ${p.description ? `<div class="profile-bio">${linkify(p.description)}</div>` : ''}
+    <div class="profile-stats">
+      <span><strong>${fmtNum(p.followersCount)}</strong> followers</span>
+      <span><strong>${fmtNum(p.followsCount)}</strong> following</span>
+      <span><strong>${fmtNum(p.postsCount)}</strong> posts</span>
+    </div></div></div></div>`;
+}
+
+/* --- Filters --- */
+const FILTERS = [
+  ['posts_and_author_threads', 'Posts'],
+  ['posts_with_replies', 'With Replies'],
+  ['posts_with_media', 'Media'],
+  ['posts_no_replies', 'No Replies'],
+];
+function showFilters() {
+  const bar = document.getElementById('filterBar');
+  bar.style.display = 'flex';
+  bar.innerHTML = FILTERS.map(([v, l]) =>
+    `<button class="filter-btn${currentFilter === v ? ' active' : ''}" data-filter="${v}">${l}</button>`
+  ).join('');
+  bar.onclick = e => {
+    const btn = e.target.closest('.filter-btn');
+    if (!btn) return;
+    currentFilter = btn.dataset.filter;
+    syncURL();
+    bar.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === currentFilter));
+    loadFeed(true);
+  };
+}
+
+/* --- Feed --- */
+async function loadFeed(fresh) {
+  if (fresh) {
+    currentCursor = null;
+    document.getElementById('feedSection').innerHTML = '<div class="status">Loading feed…</div>';
+    document.getElementById('loadMoreWrap').innerHTML = '';
+  }
+  const params = { actor: currentActor, limit: 30, filter: currentFilter };
+  if (currentCursor) params.cursor = currentCursor;
+  try {
+    const data = await api('app.bsky.feed.getAuthorFeed', params);
+    currentCursor = data.cursor || null;
+    const feed = document.getElementById('feedSection');
+    if (fresh) feed.innerHTML = '';
+    if (!data.feed.length && fresh) {
+      feed.innerHTML = '<div class="status">No posts found.</div>';
+      return;
+    }
+    data.feed.forEach((item, i) => {
+      const div = document.createElement('div');
+      div.innerHTML = renderFeedItem(item, i);
+      feed.appendChild(div.firstElementChild);
+    });
+    const wrap = document.getElementById('loadMoreWrap');
+    wrap.innerHTML = currentCursor ? '<button class="btn" id="loadMoreBtn">Load more</button>' : '';
+    if (currentCursor) {
+      document.getElementById('loadMoreBtn').onclick = () => {
+        document.getElementById('loadMoreBtn').textContent = 'Loading…';
+        loadFeed(false);
+      };
+    }
+  } catch (e) {
+    document.getElementById('feedSection').innerHTML = `<div class="status">Error loading feed: ${esc(e.message)}</div>`;
+  }
+}
+function renderFeedItem(item, idx) {
+  const post = item.post;
+  const reason = item.reason;
+  const repost = reason && reason.$type === 'app.bsky.feed.defs#reasonRepost'
+    ? `<div class="repost-label">↻ Reposted by ${esc(reason.by.displayName || reason.by.handle)}</div>` : '';
+  return `<div class="post-card" style="animation-delay:${idx * 40}ms" onclick="openThread('${esc(post.uri)}')">${repost}${renderPost(post)}</div>`;
+}
+function renderPost(post) {
+  const a = post.author;
+  const avatar = a.avatar ? `<img class="post-avatar" src="${esc(a.avatar)}" alt="">` : '<div class="post-avatar"></div>';
+  const text = post.record?.text ? `<div class="post-text">${linkify(post.record.text)}</div>` : '';
+  return `<div class="post-header">${avatar}<div><div class="post-author-name">${esc(a.displayName || a.handle)}</div><div class="post-author-handle">@${esc(a.handle)}</div></div><span class="post-time">${relTime(post.record?.createdAt || post.indexedAt)}</span></div>${text}${renderEmbed(post.embed)}`;
+}
+function renderEmbed(embed) {
+  if (!embed) return '';
+  const t = embed.$type;
+  if (t === 'app.bsky.embed.images#view') return renderImages(embed.images);
+  if (t === 'app.bsky.embed.external#view') return renderExternal(embed.external);
+  if (t === 'app.bsky.embed.record#view') return renderQuote(embed.record);
+  if (t === 'app.bsky.embed.recordWithMedia#view') {
+    let html = '';
+    if (embed.media?.$type === 'app.bsky.embed.images#view') html += renderImages(embed.media.images);
+    if (embed.media?.$type === 'app.bsky.embed.external#view') html += renderExternal(embed.media.external);
+    if (embed.record) html += renderQuote(embed.record.record || embed.record);
+    return html;
+  }
+  return '';
+}
+function renderImages(images) {
+  const n = images.length;
+  return `<div class="post-images img-${Math.min(n,4)}">${images.map(img =>
+    `<img src="${esc(img.thumb)}" alt="${esc(img.alt || '')}" onclick="event.stopPropagation();window.open('${esc(img.fullsize)}','_blank')" loading="lazy">`
+  ).join('')}</div>`;
+}
+function renderExternal(ext) {
+  const thumb = ext.thumb ? `<img class="link-card-thumb" src="${esc(ext.thumb)}" alt="" loading="lazy">` : '';
+  let host = '';
+  try { host = new URL(ext.uri).hostname; } catch {}
+  return `<a class="link-card" href="${esc(ext.uri)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${thumb}<div class="link-card-body"><div class="link-card-title">${esc(ext.title)}</div><div class="link-card-desc">${esc(ext.description)}</div><div class="link-card-url">${esc(host)}</div></div></a>`;
+}
+function renderQuote(record) {
+  if (!record || record.$type === 'app.bsky.embed.record#viewNotFound') return '';
+  const a = record.author;
+  if (!a) return '';
+  const avatar = a.avatar ? `<img class="post-avatar" src="${esc(a.avatar)}" alt="" style="width:24px;height:24px">` : '';
+  const text = record.value?.text ? `<div class="post-text">${linkify(record.value.text)}</div>` : '';
+  return `<div class="quote-card" onclick="event.stopPropagation();openThread('${esc(record.uri)}')"><div class="post-header">${avatar}<div><span class="post-author-name" style="font-size:.82rem">${esc(a.displayName || a.handle)}</span> <span class="post-author-handle" style="font-size:.75rem">@${esc(a.handle)}</span></div></div>${text}</div>`;
+}
+
+/* --- Thread overlay --- */
+async function openThread(uri) {
+  const ov = document.getElementById('overlay');
+  ov.style.display = '';
+  ov.innerHTML = '<div class="overlay-inner"><button class="overlay-back" onclick="closeOverlay()">← Back</button><div class="status">Loading thread…</div></div>';
+  try {
+    const data = await api('app.bsky.feed.getPostThread', { uri, depth: 10, parentHeight: 80 });
+    renderThread(data.thread, uri);
+  } catch (e) {
+    ov.querySelector('.overlay-inner').innerHTML = `<button class="overlay-back" onclick="closeOverlay()">← Back</button><div class="status">Error: ${esc(e.message)}</div>`;
+  }
+}
+function renderThread(thread, focusUri) {
+  // Flatten ancestors
+  const ancestors = [];
+  let node = thread.parent;
+  while (node && node.post) {
+    ancestors.unshift(node);
+    node = node.parent;
+  }
+  let html = '<button class="overlay-back" onclick="closeOverlay()">← Back</button>';
+  // Ancestors
+  for (const a of ancestors) {
+    html += `<div class="thread-post" onclick="openThread('${esc(a.post.uri)}')" style="cursor:pointer">${renderPost(a.post)}<div class="post-likes">♡ ${a.post.likeCount || 0}</div></div><div class="thread-connector"></div>`;
+  }
+  // Focused
+  html += `<div class="thread-post focused"><div class="focused-label">Viewing</div>${renderPost(thread.post)}<div class="post-likes">♡ ${thread.post.likeCount || 0}</div></div>`;
+  // Replies
+  if (thread.replies?.length) {
+    html += renderReplies(thread.replies);
+  }
+  document.querySelector('.overlay-inner').innerHTML = html;
+}
+function renderReplies(replies) {
+  const sorted = [...replies].filter(r => r.post).sort((a, b) => (b.post.likeCount || 0) - (a.post.likeCount || 0));
+  let html = '<div class="thread-replies">';
+  for (const r of sorted) {
+    html += `<div class="thread-post" onclick="event.stopPropagation();openThread('${esc(r.post.uri)}')" style="cursor:pointer">${renderPost(r.post)}<div class="post-likes">♡ ${r.post.likeCount || 0}</div></div>`;
+    if (r.replies?.length) html += renderReplies(r.replies);
+  }
+  html += '</div>';
+  return html;
+}
+function closeOverlay() {
+  document.getElementById('overlay').style.display = 'none';
+}
+document.getElementById('overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('overlay')) closeOverlay();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeOverlay();
+});
+
+/* --- Init --- */
+document.getElementById('viewBtn').addEventListener('click', () => {
+  const h = document.getElementById('handleInput').value;
+  if (h.trim()) loadProfile(h);
+});
+document.getElementById('handleInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('viewBtn').click();
+});
+readURL();
+</script>
+</body>
+</html>
