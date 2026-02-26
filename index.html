@@ -174,7 +174,7 @@ function parseFeedUrl(input) {
 }
 
 /* --- URL sync --- */
-function syncURL() {
+function syncURL(replace) {
   const p = new URLSearchParams();
   if (currentFeedUri) {
     p.set('feed', currentFeedUri);
@@ -185,7 +185,9 @@ function syncURL() {
     if (currentFilter !== 'posts_and_author_threads') p.set('filter', currentFilter);
   }
   const qs = p.toString();
-  history.replaceState(null, '', qs ? '?' + qs : location.pathname);
+  const url = qs ? '?' + qs : location.pathname;
+  if (replace) history.replaceState(null, '', url);
+  else history.pushState(null, '', url);
 }
 function readURL() {
   const p = new URLSearchParams(location.search);
@@ -215,12 +217,13 @@ async function api(method, params) {
 }
 
 /* --- Profile --- */
-async function loadProfile(handle) {
+async function loadProfile(handle, push) {
   handle = normalizeHandle(handle);
   currentActor = handle;
+  currentActors = [];
   currentCursor = null;
   currentFeedUri = null;
-  syncURL();
+  if (push) syncURL();
   const sec = document.getElementById('profileSection');
   sec.innerHTML = '<div class="status">Loading profile…</div>';
   document.getElementById('feedSection').innerHTML = '';
@@ -249,7 +252,7 @@ function renderProfile(p) {
 }
 
 /* --- Custom feed --- */
-async function loadCustomFeed(handle, feedName) {
+async function loadCustomFeed(handle, feedName, push) {
   handle = normalizeHandle(handle);
   currentActor = '';
   currentCursor = null;
@@ -262,7 +265,7 @@ async function loadCustomFeed(handle, feedName) {
     const profile = await api('app.bsky.actor.getProfile', { actor: handle });
     const feedUri = `at://${profile.did}/app.bsky.feed.generator/${feedName}`;
     currentFeedUri = feedUri;
-    syncURL();
+    if (push) syncURL();
     // Get feed generator info
     const genData = await api('app.bsky.feed.getFeedGenerator', { feed: feedUri });
     const gen = genData.view;
@@ -274,9 +277,9 @@ async function loadCustomFeed(handle, feedName) {
 }
 async function loadCustomFeedByUri(feedUri) {
   currentActor = '';
+  currentActors = [];
   currentCursor = null;
   currentFeedUri = feedUri;
-  syncURL();
   const sec = document.getElementById('profileSection');
   sec.innerHTML = '<div class="status">Loading feed…</div>';
   document.getElementById('feedSection').innerHTML = '';
@@ -303,7 +306,7 @@ function renderFeedGenerator(gen) {
 }
 
 /* --- Multi-user feed --- */
-async function loadMultiFeed(actors) {
+async function loadMultiFeed(actors, push) {
   currentActors = actors;
   currentActor = '';
   currentCursor = null;
@@ -311,7 +314,7 @@ async function loadMultiFeed(actors) {
   multiCursors = {};
   allMultiPosts = [];
   actors.forEach(a => multiCursors[a] = null);
-  syncURL();
+  if (push) syncURL();
   const sec = document.getElementById('profileSection');
   sec.innerHTML = '<div class="status">Loading profiles…</div>';
   document.getElementById('feedSection').innerHTML = '';
@@ -326,11 +329,21 @@ async function loadMultiFeed(actors) {
   }
 }
 function renderMultiProfiles(profiles) {
+  const multi = currentActors.length > 1;
   const cards = profiles.map(p => {
     const avatar = p.avatar ? `<img style="width:48px;height:48px;border-radius:50%;object-fit:cover" src="${esc(p.avatar)}" alt="">` : '<div style="width:48px;height:48px;border-radius:50%;background:var(--slate-200)"></div>';
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border:1px solid var(--slate-200);border-radius:var(--radius);box-shadow:var(--shadow);min-width:0">${avatar}<div style="min-width:0"><div style="font-weight:600;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.displayName || p.handle)}</div><div style="color:var(--slate-400);font-size:.78rem">@${esc(p.handle)}</div></div></div>`;
+    const removeBtn = multi ? `<button onclick="event.stopPropagation();removeMultiActor('${esc(p.handle)}')" style="position:absolute;top:4px;right:4px;background:none;border:none;color:var(--slate-400);font-size:16px;line-height:1;cursor:pointer;padding:2px">&times;</button>` : '';
+    return `<div onclick="loadProfile('${esc(p.handle)}',true)" style="position:relative;display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border:1px solid var(--slate-200);border-radius:var(--radius);box-shadow:var(--shadow);min-width:0;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='var(--shadow-lg)'" onmouseout="this.style.boxShadow='var(--shadow)'">${removeBtn}${avatar}<div style="min-width:0"><div style="font-weight:600;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.displayName || p.handle)}</div><div style="color:var(--slate-400);font-size:.78rem">@${esc(p.handle)}</div></div></div>`;
   }).join('');
   return `<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">${cards}</div>`;
+}
+function removeMultiActor(handle) {
+  const remaining = currentActors.filter(a => a !== handle);
+  if (remaining.length === 1) {
+    loadProfile(remaining[0], true);
+  } else if (remaining.length > 1) {
+    loadMultiFeed(remaining, true);
+  }
 }
 async function loadMultiFeedPage(fresh) {
   if (feedLoading) return;
@@ -402,7 +415,7 @@ function showFilters() {
     const btn = e.target.closest('.filter-btn');
     if (!btn) return;
     currentFilter = btn.dataset.filter;
-    syncURL();
+    syncURL(true);
     bar.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === currentFilter));
     loadFeed(true);
   };
@@ -631,19 +644,20 @@ document.getElementById('viewBtn').addEventListener('click', () => {
   if (!h.trim()) return;
   const feedInfo = parseFeedUrl(h);
   if (feedInfo) {
-    loadCustomFeed(feedInfo.handle, feedInfo.feedName);
+    loadCustomFeed(feedInfo.handle, feedInfo.feedName, true);
   } else {
     const parts = h.split(',').map(s => s.trim()).filter(Boolean);
     if (parts.length > 1) {
-      loadMultiFeed(parts.map(normalizeHandle));
+      loadMultiFeed(parts.map(normalizeHandle), true);
     } else {
-      loadProfile(h);
+      loadProfile(h, true);
     }
   }
 });
 document.getElementById('handleInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('viewBtn').click();
 });
+window.addEventListener('popstate', () => readURL());
 readURL();
 </script>
 </body>
