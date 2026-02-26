@@ -132,6 +132,7 @@ const API = 'https://public.api.bsky.app/xrpc';
 let currentActor = '';
 let currentFilter = 'posts_and_author_threads';
 let currentCursor = null;
+let feedLoading = false;
 
 /* --- Utilities --- */
 function esc(s) {
@@ -245,11 +246,13 @@ function showFilters() {
 
 /* --- Feed --- */
 async function loadFeed(fresh) {
+  if (feedLoading) return;
   if (fresh) {
     currentCursor = null;
     document.getElementById('feedSection').innerHTML = '<div class="status">Loading feed…</div>';
     document.getElementById('loadMoreWrap').innerHTML = '';
   }
+  feedLoading = true;
   const params = { actor: currentActor, limit: 30, filter: currentFilter };
   if (currentCursor) params.cursor = currentCursor;
   try {
@@ -267,15 +270,11 @@ async function loadFeed(fresh) {
       while (wrapper.firstElementChild) feed.appendChild(wrapper.firstElementChild);
     });
     const wrap = document.getElementById('loadMoreWrap');
-    wrap.innerHTML = currentCursor ? '<button class="btn" id="loadMoreBtn">Load more</button>' : '';
-    if (currentCursor) {
-      document.getElementById('loadMoreBtn').onclick = () => {
-        document.getElementById('loadMoreBtn').textContent = 'Loading…';
-        loadFeed(false);
-      };
-    }
+    wrap.innerHTML = currentCursor ? '<div class="status">Loading more…</div>' : '';
   } catch (e) {
     document.getElementById('feedSection').innerHTML = `<div class="status">Error loading feed: ${esc(e.message)}</div>`;
+  } finally {
+    feedLoading = false;
   }
 }
 function renderFeedItem(item, idx) {
@@ -445,6 +444,12 @@ document.getElementById('overlay').addEventListener('click', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeOverlay();
 });
+
+/* --- Infinite scroll --- */
+const scrollObserver = new IntersectionObserver(entries => {
+  if (entries[0].isIntersecting && currentCursor && !feedLoading) loadFeed(false);
+}, { rootMargin: '400px' });
+scrollObserver.observe(document.getElementById('loadMoreWrap'));
 
 /* --- Init --- */
 document.getElementById('viewBtn').addEventListener('click', () => {
