@@ -384,6 +384,32 @@ function renderReplies(replies) {
   html += '</div>';
   return html;
 }
+function renderInlineReply(r) {
+  const replyCount = r.replies?.length || r.post.replyCount || 0;
+  const hasLoadedReplies = r.replies?.length > 0;
+  let toggle = '';
+  if (replyCount > 0) {
+    if (hasLoadedReplies) {
+      // We already have the nested replies from the thread data, render toggle with pre-loaded content
+      const nested = [...r.replies].filter(c => c.post).sort((a, b) => (b.post.likeCount || 0) - (a.post.likeCount || 0));
+      toggle = `<div class="inline-replies-toggle" onclick="event.stopPropagation();toggleInlineReplies(this)"><span class="chevron">▶</span> ${nested.length} ${nested.length === 1 ? 'reply' : 'replies'}</div><div class="inline-replies" style="display:none" data-loaded="1">${nested.map(c => renderInlineReply(c)).join('')}</div>`;
+    } else {
+      toggle = `<div class="inline-replies-toggle" onclick="event.stopPropagation();toggleReplies(this,'${esc(r.post.uri)}')"><span class="chevron">▶</span> ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}</div><div class="inline-replies" style="display:none"></div>`;
+    }
+  }
+  return `<div class="inline-reply" onclick="event.stopPropagation();openThread('${esc(r.post.uri)}')" style="cursor:pointer">${renderPost(r.post)}<div class="post-likes">♡ ${r.post.likeCount || 0}</div>${toggle}</div>`;
+}
+function toggleInlineReplies(toggleEl) {
+  const chevron = toggleEl.querySelector('.chevron');
+  const container = toggleEl.nextElementSibling;
+  if (container.style.display !== 'none') {
+    container.style.display = 'none';
+    chevron.classList.remove('open');
+  } else {
+    container.style.display = '';
+    chevron.classList.add('open');
+  }
+}
 async function toggleReplies(toggleEl, uri) {
   const chevron = toggleEl.querySelector('.chevron');
   const container = toggleEl.nextElementSibling;
@@ -403,9 +429,7 @@ async function toggleReplies(toggleEl, uri) {
     if (!sorted.length) {
       container.innerHTML = '<div style="font-size:.8rem;color:var(--slate-400);padding:8px 0">No replies</div>';
     } else {
-      container.innerHTML = sorted.map(r =>
-        `<div class="inline-reply" onclick="event.stopPropagation();openThread('${esc(r.post.uri)}')" style="cursor:pointer">${renderPost(r.post)}<div class="post-likes">♡ ${r.post.likeCount || 0}</div></div>`
-      ).join('');
+      container.innerHTML = sorted.map(r => renderInlineReply(r)).join('');
     }
     container.dataset.loaded = '1';
   } catch (e) {
