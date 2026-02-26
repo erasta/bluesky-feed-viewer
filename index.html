@@ -117,7 +117,7 @@ h1{font-family:var(--font-heading);text-align:center;font-size:1.8rem;margin:24p
 <div class="container">
   <h1>Bluesky Feed Viewer</h1>
   <div class="search-bar">
-    <input id="handleInput" type="text" placeholder="Handle (e.g. jay) or feed URL" />
+    <input id="handleInput" type="text" placeholder="Handle (e.g. jay) or comma-separated (jay, pfrazee)" />
     <button class="btn" id="viewBtn">View Feed</button>
   </div>
   <div id="profileSection"></div>
@@ -134,6 +134,9 @@ let currentFilter = 'posts_and_author_threads';
 let currentCursor = null;
 let feedLoading = false;
 let currentFeedUri = null; // AT URI for custom feed generators
+let currentActors = []; // multi-user mode
+let multiCursors = {}; // per-handle cursors for multi-user pagination
+let allMultiPosts = []; // accumulated posts for dedup
 
 /* --- Utilities --- */
 function esc(s) {
@@ -175,6 +178,8 @@ function syncURL() {
   const p = new URLSearchParams();
   if (currentFeedUri) {
     p.set('feed', currentFeedUri);
+  } else if (currentActors.length > 1) {
+    p.set('users', currentActors.join(','));
   } else if (currentActor) {
     p.set('user', currentActor);
     if (currentFilter !== 'posts_and_author_threads') p.set('filter', currentFilter);
@@ -186,10 +191,14 @@ function readURL() {
   const p = new URLSearchParams(location.search);
   const feed = p.get('feed');
   const u = p.get('user');
+  const users = p.get('users');
   const f = p.get('filter');
   if (feed) {
     document.getElementById('handleInput').value = feed;
     loadCustomFeedByUri(feed);
+  } else if (users) {
+    document.getElementById('handleInput').value = users;
+    loadMultiFeed(users.split(',').map(h => normalizeHandle(h)));
   } else if (u) {
     document.getElementById('handleInput').value = u;
     if (f) currentFilter = f;
@@ -291,6 +300,89 @@ function renderFeedGenerator(gen) {
     <div class="profile-stats" style="margin-top:10px">
       <span><strong>${fmtNum(gen.likeCount || 0)}</strong> likes</span>
     </div></div></div>`;
+}
+
+/* --- Multi-user feed --- */
+async function loadMultiFeed(actors) {
+  currentActors = actors;
+  currentActor = '';
+  currentCursor = null;
+  currentFeedUri = null;
+  multiCursors = {};
+  allMultiPosts = [];
+  actors.forEach(a => multiCursors[a] = null);
+  syncURL();
+  const sec = document.getElementById('profileSection');
+  sec.innerHTML = '<div class="status">Loading profiles…</div>';
+  document.getElementById('feedSection').innerHTML = '';
+  document.getElementById('loadMoreWrap').innerHTML = '';
+  document.getElementById('filterBar').style.display = 'none';
+  try {
+    const profiles = await Promise.all(actors.map(a => api('app.bsky.actor.getProfile', { actor: a })));
+    sec.innerHTML = renderMultiProfiles(profiles);
+    await loadMultiFeedPage(true);
+  } catch (e) {
+    sec.innerHTML = `<div class="status">Could not load profiles: ${esc(e.message)}</div>`;
+  }
+}
+function renderMultiProfiles(profiles) {
+  const cards = profiles.map(p => {
+    const avatar = p.avatar ? `<img style="width:48px;height:48px;border-radius:50%;object-fit:cover" src="${esc(p.avatar)}" alt="">` : '<div style="width:48px;height:48px;border-radius:50%;background:var(--slate-200)"></div>';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border:1px solid var(--slate-200);border-radius:var(--radius);box-shadow:var(--shadow);min-width:0">${avatar}<div style="min-width:0"><div style="font-weight:600;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.displayName || p.handle)}</div><div style="color:var(--slate-400);font-size:.78rem">@${esc(p.handle)}</div></div></div>`;
+  }).join('');
+  return `<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">${cards}</div>`;
+}
+async function loadMultiFeedPage(fresh) {
+  if (feedLoading) return;
+  feedLoading = true;
+  const feed = document.getElementById('feedSection');
+  if (fresh) {
+    feed.innerHTML = '<div class="status">Loading feed…</div>';
+    document.getElementById('loadMoreWrap').innerHTML = '';
+    allMultiPosts = [];
+  }
+  try {
+    const activeActors = currentActors.filter(a => fresh || multiCursors[a] !== undefined);
+    const fetches = activeActors.map(async actor => {
+      const cursor = multiCursors[actor];
+      if (!fresh && cursor === undefined) return []; // exhausted
+      const params = { actor, limit: 30, filter: 'posts_and_author_threads' };
+      if (cursor) params.cursor = cursor;
+      const data = await api('app.bsky.feed.getAuthorFeed', params);
+      multiCursors[actor] = data.cursor || undefined; // undefined = exhausted
+      return data.feed;
+    });
+    const results = await Promise.all(fetches);
+    const newItems = results.flat();
+    // Dedup by post URI
+    const seen = new Set(allMultiPosts.map(item => item.post.uri));
+    const unique = newItems.filter(item => {
+      if (seen.has(item.post.uri)) return false;
+      seen.add(item.post.uri);
+      return true;
+    });
+    unique.sort((a, b) => new Date(b.post.record?.createdAt || b.post.indexedAt) - new Date(a.post.record?.createdAt || a.post.indexedAt));
+    allMultiPosts.push(...unique);
+    if (fresh) feed.innerHTML = '';
+    if (!allMultiPosts.length && fresh) {
+      feed.innerHTML = '<div class="status">No posts found.</div>';
+      return;
+    }
+    unique.forEach((item, i) => {
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = renderFeedItem(item, i);
+      while (wrapper.firstElementChild) feed.appendChild(wrapper.firstElementChild);
+    });
+    const hasMore = currentActors.some(a => multiCursors[a] !== undefined);
+    const wrap = document.getElementById('loadMoreWrap');
+    wrap.innerHTML = hasMore ? '<div class="status">Loading more…</div>' : '';
+    // Set currentCursor so infinite scroll knows whether to trigger
+    currentCursor = hasMore ? 'multi' : null;
+  } catch (e) {
+    document.getElementById('feedSection').innerHTML = `<div class="status">Error loading feed: ${esc(e.message)}</div>`;
+  } finally {
+    feedLoading = false;
+  }
 }
 
 /* --- Filters --- */
@@ -526,7 +618,10 @@ document.addEventListener('keydown', e => {
 
 /* --- Infinite scroll --- */
 const scrollObserver = new IntersectionObserver(entries => {
-  if (entries[0].isIntersecting && currentCursor && !feedLoading) loadFeed(false);
+  if (entries[0].isIntersecting && currentCursor && !feedLoading) {
+    if (currentActors.length > 1) loadMultiFeedPage(false);
+    else loadFeed(false);
+  }
 }, { rootMargin: '400px' });
 scrollObserver.observe(document.getElementById('loadMoreWrap'));
 
@@ -538,7 +633,12 @@ document.getElementById('viewBtn').addEventListener('click', () => {
   if (feedInfo) {
     loadCustomFeed(feedInfo.handle, feedInfo.feedName);
   } else {
-    loadProfile(h);
+    const parts = h.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      loadMultiFeed(parts.map(normalizeHandle));
+    } else {
+      loadProfile(h);
+    }
   }
 });
 document.getElementById('handleInput').addEventListener('keydown', e => {
