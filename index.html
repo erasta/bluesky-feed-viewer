@@ -117,7 +117,7 @@ h1{font-family:var(--font-heading);text-align:center;font-size:1.8rem;margin:24p
 <div class="container">
   <h1>Bluesky Feed Viewer</h1>
   <div class="search-bar">
-    <input id="handleInput" type="text" placeholder="Enter a Bluesky handle (e.g. jay)" />
+    <input id="handleInput" type="text" placeholder="Handle (e.g. jay) or feed URL" />
     <button class="btn" id="viewBtn">View Feed</button>
   </div>
   <div id="profileSection"></div>
@@ -133,6 +133,7 @@ let currentActor = '';
 let currentFilter = 'posts_and_author_threads';
 let currentCursor = null;
 let feedLoading = false;
+let currentFeedUri = null; // AT URI for custom feed generators
 
 /* --- Utilities --- */
 function esc(s) {
@@ -161,19 +162,35 @@ function normalizeHandle(h) {
   return h;
 }
 
+/* --- Input parsing --- */
+function parseFeedUrl(input) {
+  // Match bsky.app/profile/{handle}/feed/{feedName} or full https URL
+  const m = input.trim().match(/(?:https?:\/\/)?bsky\.app\/profile\/([^/]+)\/feed\/([^/?#]+)/);
+  if (m) return { handle: m[1], feedName: m[2] };
+  return null;
+}
+
 /* --- URL sync --- */
 function syncURL() {
   const p = new URLSearchParams();
-  if (currentActor) p.set('user', currentActor);
-  if (currentFilter !== 'posts_and_author_threads') p.set('filter', currentFilter);
+  if (currentFeedUri) {
+    p.set('feed', currentFeedUri);
+  } else if (currentActor) {
+    p.set('user', currentActor);
+    if (currentFilter !== 'posts_and_author_threads') p.set('filter', currentFilter);
+  }
   const qs = p.toString();
   history.replaceState(null, '', qs ? '?' + qs : location.pathname);
 }
 function readURL() {
   const p = new URLSearchParams(location.search);
+  const feed = p.get('feed');
   const u = p.get('user');
   const f = p.get('filter');
-  if (u) {
+  if (feed) {
+    document.getElementById('handleInput').value = feed;
+    loadCustomFeedByUri(feed);
+  } else if (u) {
     document.getElementById('handleInput').value = u;
     if (f) currentFilter = f;
     loadProfile(u);
@@ -193,6 +210,7 @@ async function loadProfile(handle) {
   handle = normalizeHandle(handle);
   currentActor = handle;
   currentCursor = null;
+  currentFeedUri = null;
   syncURL();
   const sec = document.getElementById('profileSection');
   sec.innerHTML = '<div class="status">Loading profile…</div>';
@@ -219,6 +237,60 @@ function renderProfile(p) {
       <span><strong>${fmtNum(p.followsCount)}</strong> following</span>
       <span><strong>${fmtNum(p.postsCount)}</strong> posts</span>
     </div></div></div></div>`;
+}
+
+/* --- Custom feed --- */
+async function loadCustomFeed(handle, feedName) {
+  handle = normalizeHandle(handle);
+  currentActor = '';
+  currentCursor = null;
+  const sec = document.getElementById('profileSection');
+  sec.innerHTML = '<div class="status">Loading feed…</div>';
+  document.getElementById('feedSection').innerHTML = '';
+  document.getElementById('loadMoreWrap').innerHTML = '';
+  document.getElementById('filterBar').style.display = 'none';
+  try {
+    const profile = await api('app.bsky.actor.getProfile', { actor: handle });
+    const feedUri = `at://${profile.did}/app.bsky.feed.generator/${feedName}`;
+    currentFeedUri = feedUri;
+    syncURL();
+    // Get feed generator info
+    const genData = await api('app.bsky.feed.getFeedGenerator', { feed: feedUri });
+    const gen = genData.view;
+    sec.innerHTML = renderFeedGenerator(gen);
+    loadFeed(true);
+  } catch (e) {
+    sec.innerHTML = `<div class="status">Could not load feed: ${esc(e.message)}</div>`;
+  }
+}
+async function loadCustomFeedByUri(feedUri) {
+  currentActor = '';
+  currentCursor = null;
+  currentFeedUri = feedUri;
+  syncURL();
+  const sec = document.getElementById('profileSection');
+  sec.innerHTML = '<div class="status">Loading feed…</div>';
+  document.getElementById('feedSection').innerHTML = '';
+  document.getElementById('loadMoreWrap').innerHTML = '';
+  document.getElementById('filterBar').style.display = 'none';
+  try {
+    const genData = await api('app.bsky.feed.getFeedGenerator', { feed: feedUri });
+    sec.innerHTML = renderFeedGenerator(genData.view);
+    loadFeed(true);
+  } catch (e) {
+    sec.innerHTML = `<div class="status">Could not load feed: ${esc(e.message)}</div>`;
+  }
+}
+function renderFeedGenerator(gen) {
+  const avatar = gen.avatar ? `<img style="width:64px;height:64px;border-radius:12px;object-fit:cover" src="${esc(gen.avatar)}" alt="">` : '';
+  const by = gen.creator ? `<div class="profile-handle">by @${esc(gen.creator.handle)}</div>` : '';
+  return `<div class="profile-card"><div class="profile-body" style="padding-top:16px"><div style="display:flex;gap:14px;align-items:center">${avatar}<div>
+    <div class="profile-name">${esc(gen.displayName)}</div>${by}
+    </div></div>
+    ${gen.description ? `<div class="profile-bio" style="margin-top:10px">${linkify(gen.description)}</div>` : ''}
+    <div class="profile-stats" style="margin-top:10px">
+      <span><strong>${fmtNum(gen.likeCount || 0)}</strong> likes</span>
+    </div></div></div>`;
 }
 
 /* --- Filters --- */
@@ -253,10 +325,17 @@ async function loadFeed(fresh) {
     document.getElementById('loadMoreWrap').innerHTML = '';
   }
   feedLoading = true;
-  const params = { actor: currentActor, limit: 30, filter: currentFilter };
-  if (currentCursor) params.cursor = currentCursor;
+  let data;
   try {
-    const data = await api('app.bsky.feed.getAuthorFeed', params);
+    if (currentFeedUri) {
+      const params = { feed: currentFeedUri, limit: 30 };
+      if (currentCursor) params.cursor = currentCursor;
+      data = await api('app.bsky.feed.getFeed', params);
+    } else {
+      const params = { actor: currentActor, limit: 30, filter: currentFilter };
+      if (currentCursor) params.cursor = currentCursor;
+      data = await api('app.bsky.feed.getAuthorFeed', params);
+    }
     currentCursor = data.cursor || null;
     const feed = document.getElementById('feedSection');
     if (fresh) feed.innerHTML = '';
@@ -454,7 +533,13 @@ scrollObserver.observe(document.getElementById('loadMoreWrap'));
 /* --- Init --- */
 document.getElementById('viewBtn').addEventListener('click', () => {
   const h = document.getElementById('handleInput').value;
-  if (h.trim()) loadProfile(h);
+  if (!h.trim()) return;
+  const feedInfo = parseFeedUrl(h);
+  if (feedInfo) {
+    loadCustomFeed(feedInfo.handle, feedInfo.feedName);
+  } else {
+    loadProfile(h);
+  }
 });
 document.getElementById('handleInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('viewBtn').click();
