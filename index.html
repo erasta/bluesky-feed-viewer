@@ -89,8 +89,11 @@ h1{font-family:var(--font-heading);text-align:center;font-size:1.8rem;margin:24p
 .thread-replies .thread-post{margin-top:10px}
 .post-likes{font-size:.8rem;color:var(--slate-400);margin-top:6px}
 .post-stats{display:flex;gap:14px;margin-top:8px;font-size:.8rem;color:var(--slate-400)}
-.post-stats span{cursor:pointer;transition:color .15s}
-.post-stats span:hover{color:var(--blue)}
+.post-stats>span{cursor:pointer;transition:color .15s;display:inline-flex;align-items:center;gap:4px}
+.post-stats>span:hover{color:var(--blue)}
+.eng-avatars{display:inline-flex;margin-left:2px}
+.eng-avatars img{width:18px;height:18px;border-radius:50%;object-fit:cover;margin-left:-4px;border:1.5px solid #fff}
+.eng-avatars img:first-child{margin-left:0}
 .engagement-panel{margin-top:8px;border:1px solid var(--slate-200);border-radius:10px;background:var(--slate-50);overflow:hidden;animation:fadeIn .2s}
 .engagement-tabs{display:flex;border-bottom:1px solid var(--slate-200)}
 .engagement-tab{flex:1;padding:8px;text-align:center;font-size:.8rem;font-weight:500;color:var(--slate-500);cursor:pointer;border:none;background:none;font-family:var(--font-body);transition:all .15s}
@@ -563,7 +566,7 @@ function renderPost(post, showStats) {
     const likes = post.likeCount || 0;
     const reposts = post.repostCount || 0;
     const replies = post.replyCount || 0;
-    stats = `<div class="post-stats" onclick="event.stopPropagation()"><span onclick="toggleEngagement(this,'${esc(post.uri)}','likes')">♡ ${likes}</span><span onclick="toggleEngagement(this,'${esc(post.uri)}','reposts')">↻ ${reposts}</span><span>💬 ${replies}</span></div><div class="engagement-panel" style="display:none"></div>`;
+    stats = `<div class="post-stats" data-uri="${esc(post.uri)}" onclick="event.stopPropagation()"><span onclick="toggleEngagement(this,'${esc(post.uri)}','likes')">♡ ${likes}<span class="eng-avatars" data-type="likes"></span></span><span onclick="toggleEngagement(this,'${esc(post.uri)}','reposts')">↻ ${reposts}<span class="eng-avatars" data-type="reposts"></span></span><span>💬 ${replies}</span></div><div class="engagement-panel" style="display:none"></div>`;
   }
   return `<div class="post-header">${avatar}<div><div class="post-author-name">${esc(a.displayName || a.handle)}</div><div class="post-author-handle">@${esc(a.handle)}</div></div><span class="post-time">${relTime(post.record?.createdAt || post.indexedAt)}</span></div>${text}${renderEmbed(post.embed)}${stats}`;
 }
@@ -760,6 +763,46 @@ const scrollObserver = new IntersectionObserver(entries => {
   }
 }, { rootMargin: '400px' });
 scrollObserver.observe(document.getElementById('loadMoreWrap'));
+
+/* --- Engagement avatar lazy-loader --- */
+const engObserver = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (!entry.isIntersecting) return;
+    const statsEl = entry.target;
+    engObserver.unobserve(statsEl);
+    const uri = statsEl.dataset.uri;
+    const likesContainer = statsEl.querySelector('.eng-avatars[data-type="likes"]');
+    const repostsContainer = statsEl.querySelector('.eng-avatars[data-type="reposts"]');
+    api('app.bsky.feed.getLikes', { uri, limit: 5 }).then(data => {
+      likesContainer.innerHTML = data.likes.filter(l => l.actor.avatar).slice(0, 5).map(l =>
+        `<img src="${esc(l.actor.avatar)}" alt="${esc(l.actor.handle)}" title="@${esc(l.actor.handle)}">`
+      ).join('');
+    }).catch(() => {});
+    api('app.bsky.feed.getRepostedBy', { uri, limit: 5 }).then(data => {
+      repostsContainer.innerHTML = data.repostedBy.filter(u => u.avatar).slice(0, 5).map(u =>
+        `<img src="${esc(u.avatar)}" alt="${esc(u.handle)}" title="@${esc(u.handle)}">`
+      ).join('');
+    }).catch(() => {});
+  });
+}, { rootMargin: '200px' });
+// Observe new post-stats elements via MutationObserver
+const feedContainer = document.getElementById('feedSection');
+new MutationObserver(mutations => {
+  mutations.forEach(m => m.addedNodes.forEach(n => {
+    if (n.nodeType !== 1) return;
+    n.querySelectorAll?.('.post-stats[data-uri]').forEach(el => engObserver.observe(el));
+    if (n.matches?.('.post-stats[data-uri]')) engObserver.observe(n);
+  }));
+}).observe(feedContainer, { childList: true, subtree: true });
+// Also observe stats in overlay
+const overlayEl = document.getElementById('overlay');
+new MutationObserver(mutations => {
+  mutations.forEach(m => m.addedNodes.forEach(n => {
+    if (n.nodeType !== 1) return;
+    n.querySelectorAll?.('.post-stats[data-uri]').forEach(el => engObserver.observe(el));
+    if (n.matches?.('.post-stats[data-uri]')) engObserver.observe(n);
+  }));
+}).observe(overlayEl, { childList: true, subtree: true });
 
 /* --- Init --- */
 document.getElementById('viewBtn').addEventListener('click', () => {
